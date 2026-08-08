@@ -1,0 +1,4 @@
+name: podcast-service
+runtime: go
+main: infra
+description: Lambda + S3 deployment for the podcast pipeline (curl-based remote processing)

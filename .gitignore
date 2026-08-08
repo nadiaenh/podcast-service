@@ -1,0 +1,7 @@
+.env
+data/
+lambda/bootstrap
+lambda/bootstrap.zip
+lambda/lambda
+infra/infra
+.pulumi-passphrase
