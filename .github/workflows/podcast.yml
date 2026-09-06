@@ -9,9 +9,9 @@ on:
       provider:
         description: "Text-to-speech provider"
         required: false
-        default: elevenlabs
+        default: voxtral
         type: choice
-        options: [elevenlabs, voxtral]
+        options: [voxtral, elevenlabs]
 
 permissions:
   contents: write
@@ -38,12 +38,36 @@ jobs:
         with:
           go-version: "1.25"
 
+      # Validate every provider key.
+      - name: Verify API keys
+        id: verify
+        run: |
+          if go run . verify-keys; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::API key verification failed; skipping podcast generation"
+          fi
+
+      # Fetch the article.
+      - name: Fetch article source
+        id: fetch
+        if: steps.verify.outputs.ok == 'true'
+        run: |
+          mkdir -p out
+          if go run . fetch "$URL" out; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::article source unavailable or too short; skipping podcast generation"
+          fi
+
       - name: Work out the episode number and name
         id: episode
+        if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p out
           last=${URL%/}
           last=${last##*/}
           last=${last%%[?]*}
@@ -67,12 +91,15 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Summarize into LLM transcript
+        if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         run: go run . transcript "$URL" out
 
       - name: Convert text to speech via ${{ inputs.provider }}
+        if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         run: go run . speak out
 
       - name: Rename the episode files
+        if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
           BASE: ${{ steps.episode.outputs.base }}
         run: |
@@ -81,6 +108,7 @@ jobs:
           mv out/transcript.txt "out/$BASE-transcript.txt"
 
       - name: Create GitHub release
+        if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           BASE: ${{ steps.episode.outputs.base }}

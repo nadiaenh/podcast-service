@@ -1,5 +1,7 @@
 # podcast factory
 
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white) ![Anthropic](https://img.shields.io/badge/Anthropic-Claude-D97757?logo=anthropic&logoColor=white) ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-TTS-000000?logo=elevenlabs&logoColor=white) ![Mistral](https://img.shields.io/badge/Mistral-Voxtral-FA520F?logo=mistralai&logoColor=white)
+
 Turns an article URL into a narrated podcast episode, because I get carsick reading during my commute to work so I would rather listen to my bookmarks.
 
 A GitHub Action fetches the article, writes a spoken-summary transcript with Claude, synthesizes audio with ElevenLabs or Voxtral, and publishes everything as a GitHub Release.
@@ -16,8 +18,7 @@ cd podcast-service
 ./setup.sh
 ```
 
-`setup.sh` creates `.env` from `.env.example` (fill in your keys, then run it again) and pushes the values to GitHub as repo secrets for the Action.
-Only accounts with write access to the repo can trigger the Action, so the secrets stay yours even though the repo is public.
+`setup.sh` creates `.env` from `.env.example` (fill in your keys, then run it again) and pushes the values to GitHub as repo secrets for the Action. Only accounts with write access to the repo can trigger the Action, so the secrets stay yours even though the repo is public.
 
 ## Usage
 

@@ -69,7 +69,9 @@ func main() {
 }
 
 const usage = `usage:
-  pod transcript <url> <dir>   fetch the article, write <dir>/source.md and <dir>/transcript.txt
+  pod verify-keys              check every provider key is valid before any generation
+  pod fetch <url> <dir>        extract the article, write <dir>/source.md (fails if too short)
+  pod transcript <url> <dir>   read <dir>/source.md, write <dir>/transcript.txt
   pod speak <dir>              read <dir>/transcript.txt, write <dir>/episode.mp3`
 
 func run() error {
@@ -88,13 +90,21 @@ func run() error {
 		ElevenLabsVoice:  os.Getenv("ELEVENLABS_VOICE_ID"),
 		VoxtralAPIKey:    os.Getenv("VOXTRAL_API_KEY"),
 		VoxtralVoice:     os.Getenv("VOXTRAL_VOICE_ID"),
-		TTSProvider:      envOr("TTS_PROVIDER", "elevenlabs"),
+		TTSProvider:      envOr("TTS_PROVIDER", "voxtral"),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	return dispatch(ctx, cfg, args)
+}
+
+func dispatch(ctx context.Context, cfg pipeline.Config, args []string) error {
 	switch {
+	case args[0] == "verify-keys" && len(args) == 1:
+		return cmdVerifyKeys(ctx, cfg)
+	case args[0] == "fetch" && len(args) == 3:
+		return cmdFetch(ctx, args[1], args[2])
 	case args[0] == "transcript" && len(args) == 3:
 		return cmdTranscript(ctx, cfg, args[1], args[2])
 	case args[0] == "speak" && len(args) == 2:
@@ -104,19 +114,36 @@ func run() error {
 	}
 }
 
+func cmdVerifyKeys(ctx context.Context, cfg pipeline.Config) error {
+	if err := pipeline.VerifyKeys(ctx, cfg); err != nil {
+		return err
+	}
+	fmt.Println("all required provider keys verified")
+	return nil
+}
+
+func cmdFetch(ctx context.Context, url, dir string) error {
+	res, err := pipeline.Fetch(ctx, url)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "source.md"), []byte(res.Source), 0o644); err != nil {
+		return err
+	}
+	fmt.Println(res.Title)
+	return nil
+}
+
 func cmdTranscript(ctx context.Context, cfg pipeline.Config, url, dir string) error {
-	result, err := pipeline.Transcript(ctx, cfg, url)
+	source, err := os.ReadFile(filepath.Join(dir, "source.md"))
+	if err != nil {
+		return fmt.Errorf("read source: %w", err)
+	}
+	scriptText, err := pipeline.Script(ctx, cfg, url, string(source))
 	if err != nil {
 		return fmt.Errorf("failed: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "source.md"), []byte(result.Source), 0o644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(dir, "transcript.txt"), []byte(result.Script), 0o644); err != nil {
-		return err
-	}
-	fmt.Println(result.Title)
-	return nil
+	return os.WriteFile(filepath.Join(dir, "transcript.txt"), []byte(scriptText), 0o644)
 }
 
 func cmdSpeak(ctx context.Context, cfg pipeline.Config, dir string) error {
