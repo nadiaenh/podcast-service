@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"podcast-service/internal/httpx"
+	"strings"
 )
 
 type ElevenLabs struct {
@@ -26,11 +27,11 @@ type ttsRequest struct {
 }
 
 func (e *ElevenLabs) Synthesize(ctx context.Context, script, voiceID string) ([]byte, error) {
-	if e.APIKey == "" {
-		return nil, errors.New("ELEVENLABS_API_KEY is not set")
+	if err := Validate("elevenlabs", e.APIKey, "", voiceID); err != nil {
+		return nil, err
 	}
-	if voiceID == "" {
-		return nil, errors.New("ELEVENLABS_VOICE_ID is not set")
+	if strings.TrimSpace(script) == "" {
+		return nil, errors.New("TTS script is empty")
 	}
 
 	reqBody := ttsRequest{
@@ -46,7 +47,7 @@ func (e *ElevenLabs) Synthesize(ctx context.Context, script, voiceID string) ([]
 		return nil, err
 	}
 
-	url := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s", voiceID)
+	url := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s?output_format=mp3_44100_128", voiceID)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
@@ -54,21 +55,13 @@ func (e *ElevenLabs) Synthesize(ctx context.Context, script, voiceID string) ([]
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("xi-api-key", e.APIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	body, err := httpx.Do(providerClient, req, 48<<20, true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("elevenlabs API: %w", err)
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
+	if err := validateAudio(body); err != nil {
 		return nil, err
-	}
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return nil, fmt.Errorf("ELEVENLABS_API_KEY is invalid or expired (elevenlabs api: %d %s)", resp.StatusCode, string(body))
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("elevenlabs api: %d %s", resp.StatusCode, string(body))
 	}
 	return body, nil
 }

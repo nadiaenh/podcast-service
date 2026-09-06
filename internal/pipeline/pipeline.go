@@ -2,15 +2,15 @@ package pipeline
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
+	"strings"
+	"time"
 
 	"podcast-service/internal/extract"
 	"podcast-service/internal/script"
-	"podcast-service/internal/store"
 	"podcast-service/internal/tts"
 )
 
@@ -21,103 +21,80 @@ type Config struct {
 	VoxtralAPIKey    string
 	VoxtralVoice     string
 	TTSProvider      string
-	DataDir          string
 }
 
-func idFor(url string) string {
-	h := sha1.Sum([]byte(url))
+func (cfg Config) Validate() error {
+	if strings.TrimSpace(cfg.AnthropicAPIKey) == "" {
+		return errors.New("ANTHROPIC_API_KEY is not set")
+	}
+	return tts.Validate(cfg.TTSProvider, cfg.ElevenLabsAPIKey, cfg.VoxtralAPIKey, cfg.voice())
+}
+
+func (cfg Config) voice() string {
+	if cfg.TTSProvider == "voxtral" {
+		return cfg.VoxtralVoice
+	}
+	return cfg.ElevenLabsVoice
+}
+
+// Tag is a short deterministic id for a url/provider/voice combination.
+func Tag(cfg Config, url string) string {
+	h := sha256.Sum256([]byte(url + "\x00" + cfg.TTSProvider + "\x00" + cfg.voice()))
 	return hex.EncodeToString(h[:])[:12]
 }
 
-func Run(st *store.Store, cfg Config, url string) (store.Episode, error) {
-	id := idFor(url)
-	ep, ok := st.Get(id)
-	if !ok {
-		ep = store.Episode{ID: id, URL: url, Title: url, Status: "fetching", CreatedAt: store.Now()}
-	}
-	ep.Error = ""
-	ep.UpdatedAt = store.Now()
-	st.Upsert(ep)
-
-	if ep.Status == "fetching" || ep.Title == url {
-		res, err := extract.Article(url)
-		if err != nil {
-			return fail(st, ep, "fetch", err)
-		}
-		ep.Title = res.Title
-		ep.Text = res.Text
-		ep.Status = "writing"
-		ep.UpdatedAt = store.Now()
-		st.Upsert(ep)
-	}
-
-	if ep.Script == "" {
-		scriptText, err := script.GenerateScript(cfg.AnthropicAPIKey, url, ep.Text)
-		if err != nil {
-			return fail(st, ep, "script", err)
-		}
-		ep.Script = scriptText
-		ep.Status = "synthesizing"
-		ep.UpdatedAt = store.Now()
-		st.Upsert(ep)
-	}
-
-	mp3Path := filepath.Join(cfg.DataDir, ep.ID+".mp3")
-	if _, err := os.Stat(mp3Path); err != nil {
-		provider, err := tts.New(cfg.TTSProvider, cfg.ElevenLabsAPIKey, cfg.VoxtralAPIKey)
-		if err != nil {
-			return fail(st, ep, "tts", err)
-		}
-		voiceID := cfg.ElevenLabsVoice
-		if cfg.TTSProvider == "voxtral" {
-			voiceID = cfg.VoxtralVoice
-		}
-		audio, err := provider.Synthesize(context.Background(), ep.Script, voiceID)
-		if err != nil {
-			return fail(st, ep, "tts", err)
-		}
-		if err := os.WriteFile(mp3Path, audio, 0o644); err != nil {
-			return fail(st, ep, "save", err)
-		}
-	}
-
-	ep.MP3Path = mp3Path
-	ep.Status = "done"
-	ep.UpdatedAt = store.Now()
-	st.Upsert(ep)
-	return ep, nil
+// Result is a finished episode.
+type Result struct {
+	Title  string
+	Script string
+	Audio  []byte
 }
 
-func fail(st *store.Store, ep store.Episode, step string, err error) (store.Episode, error) {
-	ep.Status = "error"
-	ep.Error = fmt.Sprintf("%s: %v", step, err)
-	ep.UpdatedAt = store.Now()
-	st.Upsert(ep)
-	return ep, fmt.Errorf("%s", ep.Error)
+func Run(cfg Config, url string) (Result, error) {
+	return RunContext(context.Background(), cfg, url)
 }
 
-func RunStateless(cfg Config, url string) (title, scriptText string, audio []byte, err error) {
-	res, err := extract.Article(url)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("fetch: %w", err)
+func RunContext(ctx context.Context, cfg Config, url string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Minute)
+	defer cancel()
+	if err := cfg.Validate(); err != nil {
+		return Result{}, err
 	}
 
-	scriptText, err = script.GenerateScript(cfg.AnthropicAPIKey, url, res.Text)
+	article, err := extract.ArticleContext(ctx, url)
 	if err != nil {
-		return res.Title, "", nil, fmt.Errorf("script: %w", err)
+		return Result{}, fmt.Errorf("fetch: %w", err)
+	}
+	if strings.TrimSpace(article.Text) == "" {
+		return Result{}, errors.New("fetch: article contains no usable text")
 	}
 
+	scriptText, err := script.GenerateScriptContext(ctx, cfg.AnthropicAPIKey, url, article.Text)
+	if err != nil {
+		return Result{}, fmt.Errorf("script: %w", err)
+	}
+	if strings.TrimSpace(scriptText) == "" {
+		return Result{}, errors.New("script: provider returned an empty script")
+	}
+
+	audio, err := synthesize(ctx, cfg, scriptText)
+	if err != nil {
+		return Result{}, fmt.Errorf("tts: %w", err)
+	}
+	return Result{Title: article.Title, Script: scriptText, Audio: audio}, nil
+}
+
+func synthesize(ctx context.Context, cfg Config, text string) ([]byte, error) {
 	provider, err := tts.New(cfg.TTSProvider, cfg.ElevenLabsAPIKey, cfg.VoxtralAPIKey)
 	if err != nil {
-		return res.Title, scriptText, nil, fmt.Errorf("tts: %w", err)
+		return nil, err
 	}
-	voiceID := cfg.ElevenLabsVoice
-	if cfg.TTSProvider == "voxtral" {
-		voiceID = cfg.VoxtralVoice
-	}
-	audio, err = provider.Synthesize(context.Background(), scriptText, voiceID)
+	audio, err := provider.Synthesize(ctx, text, cfg.voice())
 	if err != nil {
-		return res.Title, scriptText, nil, fmt.Errorf("tts: %w", err)
+		return nil, err
 	}
-	return res.Title, scriptText, audio, nil
+	if err := tts.ValidateAudio(audio); err != nil {
+		return nil, err
+	}
+	return audio, nil
 }

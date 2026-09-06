@@ -1,0 +1,51 @@
+name: podcast
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Article URL"
+        required: true
+      provider:
+        description: "TTS provider"
+        required: false
+        default: elevenlabs
+        type: choice
+        options: [elevenlabs, voxtral]
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Generate MP3
+        env:
+          URL: ${{ inputs.url }}
+          TTS_PROVIDER: ${{ inputs.provider }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          VOXTRAL_API_KEY: ${{ secrets.VOXTRAL_API_KEY }}
+          VOXTRAL_VOICE_ID: ${{ secrets.VOXTRAL_VOICE_ID }}
+        run: go run . "$URL" podcast.mp3
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ inputs.url }}
+        run: |
+          tag="ep-$(printf '%s' "$URL" | sha256sum | cut -c1-12)"
+          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" podcast.mp3 --title "$tag" --notes "Source: $URL"
+          link=$(gh release view "$tag" --json assets --jq '.assets[0].url')
+          echo "### 🎧 [$tag]($link)" >> "$GITHUB_STEP_SUMMARY"
+          echo "$link"

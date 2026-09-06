@@ -18,8 +18,8 @@ Voice and style:
 
 Written for ears, not eyes — this will be read aloud by a text-to-speech engine:
 - Never use symbols, shorthand, or notation that requires seeing it to parse. Write out what it means in full.
-  - Bad: "bufio.Scanner" → Good: "the bufio Scanner package"
-  - Bad: "r1: 1m45s" → Good: "The first solution ran in 1 minute and 45 seconds"
+  - Bad: "bufio.Scanner" → Good: "the buff-I-O Scanner package"
+  - Bad: "r1: 1m45s" → Good: "The first solution, r1, ran in 1 minute and 45 seconds"
   - Bad: "station-name-semicolon-temperature" → Good: "a station name, a semicolon, and a temperature"
   - Bad: "13GB text file" → Good: "a 13 gigabyte text file"
 - Never introduce a list or breakdown with a colon mid-sentence. Structure it as sequential sentences instead.

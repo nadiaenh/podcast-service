@@ -7,8 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"podcast-service/internal/httpx"
+	"strings"
 )
 
 type Voxtral struct {
@@ -16,9 +17,10 @@ type Voxtral struct {
 }
 
 type voxtralRequest struct {
-	Model string `json:"model"`
-	Input string `json:"input"`
-	Voice string `json:"voice"`
+	Model          string `json:"model"`
+	Input          string `json:"input"`
+	Voice          string `json:"voice_id"`
+	ResponseFormat string `json:"response_format"`
 }
 
 type voxtralResponse struct {
@@ -26,17 +28,18 @@ type voxtralResponse struct {
 }
 
 func (v *Voxtral) Synthesize(ctx context.Context, script, voiceID string) ([]byte, error) {
-	if v.APIKey == "" {
-		return nil, errors.New("VOXTRAL_API_KEY is not set")
+	if err := Validate("voxtral", "", v.APIKey, voiceID); err != nil {
+		return nil, err
 	}
-	if voiceID == "" {
-		return nil, errors.New("VOXTRAL_VOICE_ID is not set")
+	if strings.TrimSpace(script) == "" {
+		return nil, errors.New("TTS script is empty")
 	}
 
 	reqBody := voxtralRequest{
-		Model: "voxtral-mini-tts-2603",
-		Input: script,
-		Voice: voiceID,
+		Model:          "voxtral-mini-tts-2603",
+		Input:          script,
+		Voice:          voiceID,
+		ResponseFormat: "mp3",
 	}
 	raw, err := json.Marshal(reqBody)
 	if err != nil {
@@ -50,30 +53,21 @@ func (v *Voxtral) Synthesize(ctx context.Context, script, voiceID string) ([]byt
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+v.APIKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	body, err := httpx.Do(providerClient, req, 48<<20, true)
 	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		return nil, fmt.Errorf("VOXTRAL_API_KEY is invalid or expired (voxtral api: %d %s)", resp.StatusCode, string(body))
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("voxtral api: %d %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("voxtral API: %w", err)
 	}
 
 	var data voxtralResponse
 	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, fmt.Errorf("voxtral api: decode response: %w", err)
+		return nil, errors.New("voxtral API: invalid response")
 	}
 	audio, err := base64.StdEncoding.DecodeString(data.AudioData)
 	if err != nil {
-		return nil, fmt.Errorf("voxtral api: decode audio: %w", err)
+		return nil, errors.New("voxtral API: invalid audio encoding")
+	}
+	if err := validateAudio(audio); err != nil {
+		return nil, err
 	}
 	return audio, nil
 }

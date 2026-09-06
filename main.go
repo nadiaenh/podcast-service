@@ -2,32 +2,54 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"podcast-service/internal/pipeline"
-	"podcast-service/internal/store"
 )
 
-func loadEnv(path string) {
+func loadEnv(path string) error {
 	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		if err := applyEnvLine(scanner.Text()); err != nil {
+			return err
 		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		os.Setenv(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 	}
+	return scanner.Err()
+}
+
+// applyEnvLine sets one KEY=value line from a .env file.
+// A variable already set in the environment is left untouched.
+func applyEnvLine(raw string) error {
+	line := strings.TrimSpace(raw)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return nil
+	}
+	key, value, ok := strings.Cut(line, "=")
+	if !ok {
+		return nil
+	}
+	key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+	if _, present := os.LookupEnv(key); present {
+		return nil
+	}
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
+		value = value[1 : len(value)-1]
+	}
+	return os.Setenv(key, value)
 }
 
 func envOr(key, fallback string) string {
@@ -38,21 +60,24 @@ func envOr(key, fallback string) string {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("usage: pod <url>")
-		os.Exit(1)
-	}
-	url := os.Args[1]
-
-	loadEnv(".env")
-
-	dataDir := "./data"
-	os.MkdirAll(dataDir, 0o755)
-
-	st, err := store.New(dataDir + "/episodes.json")
-	if err != nil {
+	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func run() error {
+	if len(os.Args) < 2 || len(os.Args) > 3 {
+		return fmt.Errorf("usage: pod <url> [output.mp3]")
+	}
+	url := os.Args[1]
+	out := "podcast.mp3"
+	if len(os.Args) == 3 {
+		out = os.Args[2]
+	}
+
+	if err := loadEnv(".env"); err != nil {
+		return fmt.Errorf("load .env: %w", err)
 	}
 
 	cfg := pipeline.Config{
@@ -62,14 +87,17 @@ func main() {
 		VoxtralAPIKey:    os.Getenv("VOXTRAL_API_KEY"),
 		VoxtralVoice:     os.Getenv("VOXTRAL_VOICE_ID"),
 		TTSProvider:      envOr("TTS_PROVIDER", "elevenlabs"),
-		DataDir:          dataDir,
 	}
 
-	ep, err := pipeline.Run(st, cfg, url)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	result, err := pipeline.RunContext(ctx, cfg, url)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed: %v\nrun again to resume from this step\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed: %w", err)
 	}
-
-	fmt.Println(ep.MP3Path)
+	if err := os.WriteFile(out, result.Audio, 0o644); err != nil {
+		return err
+	}
+	fmt.Println(out)
+	return nil
 }

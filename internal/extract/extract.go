@@ -1,11 +1,14 @@
 package extract
 
 import (
-	"fmt"
-	"io"
+	"context"
+	"errors"
 	"net/http"
+	"podcast-service/internal/httpx"
 	"regexp"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
 
 type Result struct {
@@ -50,63 +53,72 @@ func extractTitle(html, fallback string) string {
 	return decodeEntities(strings.TrimSpace(m[1]))
 }
 
-func fetchHTML(url string) (string, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("fetch failed: %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
-}
+var articleClient = httpx.NewClient(45*time.Second, true)
 
-func FetchDirect(url string) (Result, error) {
-	html, err := fetchHTML(url)
+func fetchHTML(ctx context.Context, rawURL string) (string, error) {
+	if err := httpx.ValidateURL(rawURL); err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	if err != nil {
+		return "", errors.New("invalid article request")
+	}
+	req.Header.Set("User-Agent", "podcast-service/1.0")
+	body, err := httpx.Do(articleClient, req, 4<<20, false)
+	return string(body), err
+}
+func truncate(s string) string {
+	if len(s) > 20000 {
+		s = s[:20000]
+		for !utf8.ValidString(s) {
+			s = s[:len(s)-1]
+		}
+	}
+	return s
+}
+func FetchDirect(rawURL string) (Result, error) { return fetchDirect(context.Background(), rawURL) }
+func fetchDirect(ctx context.Context, rawURL string) (Result, error) {
+	html, err := fetchHTML(ctx, rawURL)
 	if err != nil {
 		return Result{}, err
 	}
-	title := extractTitle(html, url)
-	text := stripHTML(html)
-	if len(text) > 20000 {
-		text = text[:20000]
-	}
-	return Result{Title: title, Text: text}, nil
+	return Result{Title: extractTitle(html, rawURL), Text: truncate(stripHTML(html))}, nil
 }
-
-func FetchJina(url string) (Result, error) {
-	text, err := fetchHTML("https://r.jina.ai/" + url)
+func FetchJina(rawURL string) (Result, error) { return fetchJina(context.Background(), rawURL) }
+func fetchJina(ctx context.Context, rawURL string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	if err := httpx.ValidatePublicURL(ctx, rawURL); err != nil {
+		return Result{}, err
+	}
+	text, err := fetchHTML(ctx, "https://r.jina.ai/"+rawURL)
 	if err != nil {
 		return Result{}, err
 	}
-	text = strings.TrimSpace(text)
-	if len(text) > 20000 {
-		text = text[:20000]
-	}
-	return Result{Title: url, Text: text}, nil
+	return Result{Title: rawURL, Text: truncate(strings.TrimSpace(text))}, nil
 }
-
-func Article(url string) (Result, error) {
-	res, err := FetchDirect(url)
+func Article(rawURL string) (Result, error) { return ArticleContext(context.Background(), rawURL) }
+func ArticleContext(ctx context.Context, rawURL string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if err := httpx.ValidatePublicURL(ctx, rawURL); err != nil {
+		return Result{}, err
+	}
+	res, err := fetchDirect(ctx, rawURL)
 	if err == nil && len(res.Text) > 200 {
 		return res, nil
 	}
-	jres, jerr := FetchJina(url)
-	if jerr == nil && len(jres.Text) > 0 {
+	if ctx.Err() != nil {
+		return Result{}, ctx.Err()
+	}
+	jres, jerr := fetchJina(ctx, rawURL)
+	if jerr == nil && len(jres.Text) > 200 {
 		return jres, nil
 	}
-	if err != nil {
-		return Result{}, err
+	if err == nil && strings.TrimSpace(res.Text) != "" {
+		return res, nil
 	}
-	return res, nil
+	return Result{}, errors.New("article extraction failed; check that the URL contains accessible text")
 }
+
+func ValidateURL(raw string) error { return httpx.ValidateURL(raw) }
