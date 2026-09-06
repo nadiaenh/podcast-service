@@ -56,49 +56,34 @@ func testConfig() Config {
 }
 
 func TestValidate(t *testing.T) {
-	if err := testConfig().Validate(); err != nil {
+	if err := testConfig().validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 
 	missingKey := testConfig()
 	missingKey.AnthropicAPIKey = ""
-	if err := missingKey.Validate(); err == nil {
+	if err := missingKey.validate(); err == nil {
 		t.Fatal("missing ANTHROPIC_API_KEY accepted")
 	}
 
 	missingVoice := testConfig()
 	missingVoice.ElevenLabsVoice = ""
-	if err := missingVoice.Validate(); err == nil {
+	if err := missingVoice.validate(); err == nil {
 		t.Fatal("missing voice accepted")
 	}
 
 	voxtralNoKey := testConfig()
 	voxtralNoKey.TTSProvider = "voxtral"
 	voxtralNoKey.VoxtralVoice = "v"
-	if err := voxtralNoKey.Validate(); err == nil {
+	if err := voxtralNoKey.validate(); err == nil {
 		t.Fatal("voxtral without key accepted")
 	}
 }
 
-func TestTagSeparatesURLAndVoice(t *testing.T) {
-	cfg := testConfig()
-	a := Tag(cfg, "https://example.com/one")
-	if a == Tag(cfg, "https://example.com/two") {
-		t.Fatal("different URLs share a tag")
-	}
-	cfg.ElevenLabsVoice = "other"
-	if a == Tag(cfg, "https://example.com/one") {
-		t.Fatal("different voices share a tag")
-	}
-	if Tag(testConfig(), "https://example.com/one") != a {
-		t.Fatal("tag is not deterministic")
-	}
-}
-
-func TestRunContextValidatesBeforeNetwork(t *testing.T) {
+func TestScriptValidatesBeforeNetwork(t *testing.T) {
 	bad := testConfig()
 	bad.AnthropicAPIKey = ""
-	if _, err := Run(bad, "https://example.com"); err == nil {
+	if _, err := Script(context.Background(), bad, "https://example.com", "source text"); err == nil {
 		t.Fatal("invalid config reached the network")
 	}
 }

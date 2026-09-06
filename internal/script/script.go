@@ -36,10 +36,7 @@ type response struct {
 
 var scriptClient = httpx.NewClient(2*time.Minute, false)
 
-func GenerateScript(apiKey, model, url, articleText string) (string, error) {
-	return GenerateScriptContext(context.Background(), apiKey, model, url, articleText)
-}
-func GenerateScriptContext(ctx context.Context, apiKey, model, url, articleText string) (string, error) {
+func Generate(ctx context.Context, apiKey, model, url, articleText string) (string, error) {
 	if strings.TrimSpace(articleText) == "" {
 		return "", errors.New("article text is empty")
 	}
@@ -74,10 +71,10 @@ func GenerateScriptContext(ctx context.Context, apiKey, model, url, articleText 
 	if err != nil {
 		return "", fmt.Errorf("claude API: %w", err)
 	}
-	return parseScriptResponse(body)
+	return parseResponse(body)
 }
 
-func parseScriptResponse(body []byte) (string, error) {
+func parseResponse(body []byte) (string, error) {
 	var data response
 	if err := json.Unmarshal(body, &data); err != nil {
 		return "", errors.New("claude API: invalid response")

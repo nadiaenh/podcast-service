@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"podcast-service/internal/httpx"
 	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"podcast-service/internal/httpx"
 )
 
 type Result struct {
@@ -16,50 +17,79 @@ type Result struct {
 	Text  string
 }
 
+const (
+	maxTextChars = 20000
+	minTextChars = 200
+)
+
 var (
 	titleRe  = regexp.MustCompile(`(?is)<title[^>]*>([^<]*)</title>`)
 	scriptRe = regexp.MustCompile(`(?is)<script[\s\S]*?</script>`)
 	styleRe  = regexp.MustCompile(`(?is)<style[\s\S]*?</style>`)
 	tagRe    = regexp.MustCompile(`<[^>]+>`)
 	wsRe     = regexp.MustCompile(`\s+`)
+
+	entities = strings.NewReplacer(
+		"&amp;", "&", "&lt;", "<", "&gt;", ">",
+		"&quot;", `"`, "&#39;", "'", "&nbsp;", " ",
+	)
+
+	articleClient = httpx.NewClient(45*time.Second, true)
 )
 
-var entityReplacer = strings.NewReplacer(
-	"&amp;", "&",
-	"&lt;", "<",
-	"&gt;", ">",
-	"&quot;", "\"",
-	"&#39;", "'",
-	"&nbsp;", " ",
-)
-
-func decodeEntities(s string) string {
-	return entityReplacer.Replace(s)
-}
-
-func stripHTML(html string) string {
-	s := scriptRe.ReplaceAllString(html, " ")
-	s = styleRe.ReplaceAllString(s, " ")
-	s = tagRe.ReplaceAllString(s, " ")
-	s = decodeEntities(s)
-	return strings.TrimSpace(wsRe.ReplaceAllString(s, " "))
-}
-
-func extractTitle(html, fallback string) string {
-	m := titleRe.FindStringSubmatch(html)
-	if m == nil {
-		return fallback
+func Article(ctx context.Context, url string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if err := httpx.ValidatePublicURL(ctx, url); err != nil {
+		return Result{}, err
 	}
-	return decodeEntities(strings.TrimSpace(m[1]))
+
+	direct, err := fetchDirect(ctx, url)
+	if err == nil && len(direct.Text) > minTextChars {
+		return direct, nil
+	}
+	if ctx.Err() != nil {
+		return Result{}, ctx.Err()
+	}
+	if reader, rerr := fetchViaReader(ctx, url); rerr == nil && len(reader.Text) > minTextChars {
+		return reader, nil
+	}
+	if err == nil && strings.TrimSpace(direct.Text) != "" {
+		return direct, nil
+	}
+	return Result{}, errors.New("article extraction failed; check that the URL contains accessible text")
 }
 
-var articleClient = httpx.NewClient(45*time.Second, true)
+func fetchDirect(ctx context.Context, url string) (Result, error) {
+	html, err := fetchHTML(ctx, url)
+	if err != nil {
+		return Result{}, err
+	}
+	title := url
+	if m := titleRe.FindStringSubmatch(html); m != nil {
+		title = entities.Replace(strings.TrimSpace(m[1]))
+	}
+	return Result{Title: title, Text: clip(plainText(html))}, nil
+}
 
-func fetchHTML(ctx context.Context, rawURL string) (string, error) {
-	if err := httpx.ValidateURL(rawURL); err != nil {
+func fetchViaReader(ctx context.Context, url string) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	if err := httpx.ValidatePublicURL(ctx, url); err != nil {
+		return Result{}, err
+	}
+	text, err := fetchHTML(ctx, "https://r.jina.ai/"+url)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Title: url, Text: clip(strings.TrimSpace(text))}, nil
+}
+
+func fetchHTML(ctx context.Context, url string) (string, error) {
+	if err := httpx.ValidateURL(url); err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", errors.New("invalid article request")
 	}
@@ -67,58 +97,22 @@ func fetchHTML(ctx context.Context, rawURL string) (string, error) {
 	body, err := httpx.Do(articleClient, req, 4<<20, false)
 	return string(body), err
 }
-func truncate(s string) string {
-	if len(s) > 20000 {
-		s = s[:20000]
-		for !utf8.ValidString(s) {
-			s = s[:len(s)-1]
-		}
+
+func plainText(html string) string {
+	s := scriptRe.ReplaceAllString(html, " ")
+	s = styleRe.ReplaceAllString(s, " ")
+	s = tagRe.ReplaceAllString(s, " ")
+	s = entities.Replace(s)
+	return strings.TrimSpace(wsRe.ReplaceAllString(s, " "))
+}
+
+func clip(s string) string {
+	if len(s) <= maxTextChars {
+		return s
+	}
+	s = s[:maxTextChars]
+	for !utf8.ValidString(s) {
+		s = s[:len(s)-1]
 	}
 	return s
 }
-func FetchDirect(rawURL string) (Result, error) { return fetchDirect(context.Background(), rawURL) }
-func fetchDirect(ctx context.Context, rawURL string) (Result, error) {
-	html, err := fetchHTML(ctx, rawURL)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Title: extractTitle(html, rawURL), Text: truncate(stripHTML(html))}, nil
-}
-func FetchJina(rawURL string) (Result, error) { return fetchJina(context.Background(), rawURL) }
-func fetchJina(ctx context.Context, rawURL string) (Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	if err := httpx.ValidatePublicURL(ctx, rawURL); err != nil {
-		return Result{}, err
-	}
-	text, err := fetchHTML(ctx, "https://r.jina.ai/"+rawURL)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Title: rawURL, Text: truncate(strings.TrimSpace(text))}, nil
-}
-func Article(rawURL string) (Result, error) { return ArticleContext(context.Background(), rawURL) }
-func ArticleContext(ctx context.Context, rawURL string) (Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	if err := httpx.ValidatePublicURL(ctx, rawURL); err != nil {
-		return Result{}, err
-	}
-	res, err := fetchDirect(ctx, rawURL)
-	if err == nil && len(res.Text) > 200 {
-		return res, nil
-	}
-	if ctx.Err() != nil {
-		return Result{}, ctx.Err()
-	}
-	jres, jerr := fetchJina(ctx, rawURL)
-	if jerr == nil && len(jres.Text) > 200 {
-		return jres, nil
-	}
-	if err == nil && strings.TrimSpace(res.Text) != "" {
-		return res, nil
-	}
-	return Result{}, errors.New("article extraction failed; check that the URL contains accessible text")
-}
-
-func ValidateURL(raw string) error { return httpx.ValidateURL(raw) }

@@ -23,18 +23,17 @@ func loadEnv(path string) error {
 		return err
 	}
 	defer f.Close()
+
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		if err := applyEnvLine(scanner.Text()); err != nil {
+		if err := setEnvLine(scanner.Text()); err != nil {
 			return err
 		}
 	}
 	return scanner.Err()
 }
 
-// applyEnvLine sets one KEY=value line from a .env file.
-// A variable already set in the environment is left untouched.
-func applyEnvLine(raw string) error {
+func setEnvLine(raw string) error {
 	line := strings.TrimSpace(raw)
 	if line == "" || strings.HasPrefix(line, "#") {
 		return nil
@@ -43,22 +42,15 @@ func applyEnvLine(raw string) error {
 	if !ok {
 		return nil
 	}
-	key, value = strings.TrimSpace(key), strings.TrimSpace(value)
-	if _, present := os.LookupEnv(key); present {
-		return nil
-	}
+	key = strings.TrimSpace(key)
 	value = strings.TrimSpace(value)
 	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
 		value = value[1 : len(value)-1]
 	}
-	return os.Setenv(key, value)
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+	if _, present := os.LookupEnv(key); present {
+		return nil
 	}
-	return fallback
+	return os.Setenv(key, value)
 }
 
 func main() {
@@ -84,13 +76,17 @@ func run() error {
 		return fmt.Errorf("load .env: %w", err)
 	}
 
+	provider := os.Getenv("TTS_PROVIDER")
+	if provider == "" {
+		provider = "voxtral"
+	}
 	cfg := pipeline.Config{
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		ElevenLabsAPIKey: os.Getenv("ELEVENLABS_API_KEY"),
 		ElevenLabsVoice:  os.Getenv("ELEVENLABS_VOICE_ID"),
 		VoxtralAPIKey:    os.Getenv("VOXTRAL_API_KEY"),
 		VoxtralVoice:     os.Getenv("VOXTRAL_VOICE_ID"),
-		TTSProvider:      envOr("TTS_PROVIDER", "voxtral"),
+		TTSProvider:      provider,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -127,7 +123,7 @@ func cmdFetch(ctx context.Context, url, dir string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "source.md"), []byte(res.Source), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "source.md"), []byte(res.Text), 0o644); err != nil {
 		return err
 	}
 	fmt.Println(res.Title)

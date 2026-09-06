@@ -18,7 +18,7 @@ func TestScriptRejectsIncompleteOutput(t *testing.T) {
 		scriptClient = &http.Client{Transport: transport(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}
-		if _, e := GenerateScriptContext(context.Background(), "test", "claude-opus-5", "https://example.com", "article"); e == nil {
+		if _, e := Generate(context.Background(), "test", "claude-opus-5", "https://example.com", "article"); e == nil {
 			t.Fatalf("accepted %s", body)
 		}
 	}

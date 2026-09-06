@@ -4,7 +4,7 @@
 
 Turns an article URL into a narrated podcast episode, because I get carsick reading during my commute to work so I would rather listen to my bookmarks.
 
-A GitHub Action fetches the article, writes a spoken-summary transcript with Claude, synthesizes audio with ElevenLabs or Voxtral, and publishes everything as a GitHub Release.
+A GitHub Action fetches the article, writes a spoken-summary transcript with Claude, synthesizes audio with ElevenLabs or Voxtral, and publishes everything as a [GitHub Release](https://github.com/nadiaenh/podcast-service/releases).
 
 <!--Add DEMO here-->
 
