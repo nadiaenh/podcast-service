@@ -14,7 +14,7 @@ import (
 
 const minSourceChars = 600
 
-var scriptModels = []string{"claude-opus-5", "claude-opus-5", "claude-sonnet-5"}
+var scriptModels = []string{"claude-opus-5", "claude-sonnet-5"}
 
 type Config struct {
 	AnthropicAPIKey  string
@@ -53,15 +53,13 @@ func (cfg Config) ttsProviders() (primary, fallback string) {
 	return "elevenlabs", "voxtral"
 }
 
-func (cfg Config) ttsPlan() []string {
+func (cfg Config) ttsChain() []string {
 	primary, fallback := cfg.ttsProviders()
-	plan := []string{primary, primary}
 	if tts.Validate(fallback, cfg.credentials()) == nil {
-		plan = append(plan, fallback)
-	} else {
-		warnf("tts: fallback provider %q is not configured; no cross-provider retry available", fallback)
+		return []string{primary, fallback}
 	}
-	return plan
+	warnf("tts: fallback provider %q is not configured; no cross-provider retry available", fallback)
+	return []string{primary}
 }
 
 func Fetch(ctx context.Context, url string) (Source, error) {
@@ -86,21 +84,20 @@ func Script(ctx context.Context, cfg Config, url, source string) (string, error)
 		return "", errors.New("script: source text is empty")
 	}
 
-	attempts := make([]attempt[string], len(scriptModels))
-	for i, model := range scriptModels {
-		model := model
-		attempts[i] = attempt[string]{model, func() (string, error) {
-			return script.Generate(ctx, cfg.AnthropicAPIKey, model, url, source)
-		}}
+	var lastErr error
+	for _, model := range scriptModels {
+		text, err := script.Generate(ctx, cfg.AnthropicAPIKey, model, url, source)
+		if err != nil {
+			warnf("script: model %q failed: %v", model, err)
+			lastErr = err
+			continue
+		}
+		if strings.TrimSpace(text) == "" {
+			return "", errors.New("script: provider returned an empty script")
+		}
+		return text, nil
 	}
-	text, err := tryInOrder(ctx, "script", attempts)
-	if err != nil {
-		return "", fmt.Errorf("script: %w", err)
-	}
-	if strings.TrimSpace(text) == "" {
-		return "", errors.New("script: provider returned an empty script")
-	}
-	return text, nil
+	return "", fmt.Errorf("script: %w", lastErr)
 }
 
 func Speak(ctx context.Context, cfg Config, transcript string) ([]byte, error) {
@@ -112,40 +109,31 @@ func Speak(ctx context.Context, cfg Config, transcript string) ([]byte, error) {
 	}
 
 	creds := cfg.credentials()
-	plan := cfg.ttsPlan()
-	attempts := make([]attempt[[]byte], len(plan))
-	for i, name := range plan {
-		name := name
-		attempts[i] = attempt[[]byte]{name, func() ([]byte, error) {
-			return tts.Synthesize(ctx, name, creds, transcript)
-		}}
+	var lastErr error
+	for _, name := range cfg.ttsChain() {
+		audio, err := tts.Synthesize(ctx, name, creds, transcript)
+		if err != nil {
+			warnf("tts: provider %q failed: %v", name, err)
+			lastErr = err
+			continue
+		}
+		return audio, nil
 	}
-	audio, err := tryInOrder(ctx, "tts", attempts)
-	if err != nil {
-		return nil, fmt.Errorf("tts: %w", err)
-	}
-	return audio, nil
+	return nil, fmt.Errorf("tts: %w", lastErr)
 }
 
 func VerifyKeys(ctx context.Context, cfg Config) error {
 	creds := cfg.credentials()
 	primary, fallback := cfg.ttsProviders()
 
-	anthropic := func() (struct{}, error) { return struct{}{}, script.VerifyKey(ctx, cfg.AnthropicAPIKey) }
-	verifyTTS := func(name string) func() (struct{}, error) {
-		return func() (struct{}, error) { return struct{}{}, tts.Verify(ctx, name, creds) }
-	}
-
 	var problems []string
-	if _, err := tryInOrder(ctx, "verify anthropic", []attempt[struct{}]{
-		{"anthropic", anthropic}, {"anthropic", anthropic},
-	}); err != nil {
+	if err := script.VerifyKey(ctx, cfg.AnthropicAPIKey); err != nil {
 		problems = append(problems, fmt.Sprintf("anthropic: %v", err))
 	}
-	if _, err := tryInOrder(ctx, "verify tts", []attempt[struct{}]{
-		{primary, verifyTTS(primary)}, {primary, verifyTTS(primary)}, {fallback, verifyTTS(fallback)},
-	}); err != nil {
-		problems = append(problems, fmt.Sprintf("tts: no usable provider (%v)", err))
+	if err := tts.Verify(ctx, primary, creds); err != nil {
+		if fbErr := tts.Verify(ctx, fallback, creds); fbErr != nil {
+			problems = append(problems, fmt.Sprintf("tts: no usable provider (%v; %v)", err, fbErr))
+		}
 	}
 
 	if len(problems) > 0 {

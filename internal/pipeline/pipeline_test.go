@@ -2,52 +2,17 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"testing"
-	"time"
 )
 
-func TestTryInOrderFallsBackThenSucceeds(t *testing.T) {
-	old := retryWaits
-	retryWaits = []time.Duration{0, 0, 0}
-	defer func() { retryWaits = old }()
-
-	calls := 0
-	attempts := []attempt[int]{
-		{"primary", func() (int, error) { calls++; return 0, errors.New("boom") }},
-		{"primary", func() (int, error) { calls++; return 0, errors.New("boom") }},
-		{"fallback", func() (int, error) { calls++; return 7, nil }},
-	}
-	got, err := tryInOrder(context.Background(), "test", attempts)
-	if err != nil || got != 7 || calls != 3 {
-		t.Fatalf("got=%d err=%v calls=%d", got, err, calls)
-	}
-}
-
-func TestTryInOrderReturnsLastErrorAndHonorsContext(t *testing.T) {
-	old := retryWaits
-	retryWaits = []time.Duration{0, time.Hour}
-	defer func() { retryWaits = old }()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := tryInOrder(ctx, "test", []attempt[int]{
-		{"a", func() (int, error) { return 0, errors.New("first") }},
-		{"b", func() (int, error) { return 0, errors.New("second") }},
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context cancellation, got %v", err)
-	}
-}
-
-func TestTTSPlanOrdersPrimaryThenConfiguredFallback(t *testing.T) {
+func TestTTSChainOrdersPrimaryThenConfiguredFallback(t *testing.T) {
 	both := Config{TTSProvider: "voxtral", VoxtralAPIKey: "k", VoxtralVoice: "v", ElevenLabsAPIKey: "k", ElevenLabsVoice: "v"}
-	if got := both.ttsPlan(); len(got) != 3 || got[0] != "voxtral" || got[2] != "elevenlabs" {
-		t.Fatalf("plan = %v", got)
+	if got := both.ttsChain(); len(got) != 2 || got[0] != "voxtral" || got[1] != "elevenlabs" {
+		t.Fatalf("chain = %v", got)
 	}
 	noFallback := Config{TTSProvider: "voxtral", VoxtralAPIKey: "k", VoxtralVoice: "v"}
-	if got := noFallback.ttsPlan(); len(got) != 2 {
-		t.Fatalf("plan without fallback = %v", got)
+	if got := noFallback.ttsChain(); len(got) != 1 || got[0] != "voxtral" {
+		t.Fatalf("chain without fallback = %v", got)
 	}
 }
 
