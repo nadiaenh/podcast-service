@@ -46,6 +46,7 @@ func Tag(cfg Config, url string) string {
 // Result is a finished episode.
 type Result struct {
 	Title  string
+	Source string
 	Script string
 	Audio  []byte
 }
@@ -57,6 +58,20 @@ func Run(cfg Config, url string) (Result, error) {
 func RunContext(ctx context.Context, cfg Config, url string) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Minute)
 	defer cancel()
+	res, err := Transcript(ctx, cfg, url)
+	if err != nil {
+		return Result{}, err
+	}
+	audio, err := Speak(ctx, cfg, res.Script)
+	if err != nil {
+		return Result{}, err
+	}
+	res.Audio = audio
+	return res, nil
+}
+
+// Transcript fetches the article and writes the spoken-summary script for it.
+func Transcript(ctx context.Context, cfg Config, url string) (Result, error) {
 	if err := cfg.Validate(); err != nil {
 		return Result{}, err
 	}
@@ -77,11 +92,22 @@ func RunContext(ctx context.Context, cfg Config, url string) (Result, error) {
 		return Result{}, errors.New("script: provider returned an empty script")
 	}
 
+	return Result{Title: article.Title, Source: article.Text, Script: scriptText}, nil
+}
+
+// Speak synthesizes narrated audio from a transcript.
+func Speak(ctx context.Context, cfg Config, scriptText string) ([]byte, error) {
+	if strings.TrimSpace(scriptText) == "" {
+		return nil, errors.New("tts: transcript is empty")
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	audio, err := synthesize(ctx, cfg, scriptText)
 	if err != nil {
-		return Result{}, fmt.Errorf("tts: %w", err)
+		return nil, fmt.Errorf("tts: %w", err)
 	}
-	return Result{Title: article.Title, Script: scriptText, Audio: audio}, nil
+	return audio, nil
 }
 
 func synthesize(ctx context.Context, cfg Config, text string) ([]byte, error) {

@@ -1,4 +1,4 @@
-name: podcast
+name: Generate new podcast
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: "Article URL"
         required: true
       provider:
-        description: "TTS provider"
+        description: "Text-to-speech provider"
         required: false
         default: elevenlabs
         type: choice
@@ -18,34 +18,79 @@ permissions:
 
 jobs:
   generate:
+    name: Generate new podcast
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    env:
+      URL: ${{ inputs.url }}
+      TTS_PROVIDER: ${{ inputs.provider }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+      VOXTRAL_API_KEY: ${{ secrets.VOXTRAL_API_KEY }}
+      VOXTRAL_VOICE_ID: ${{ secrets.VOXTRAL_VOICE_ID }}
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out the repository
+        uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v6
+      - name: Install Go
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25"
 
-      - name: Generate MP3
-        env:
-          URL: ${{ inputs.url }}
-          TTS_PROVIDER: ${{ inputs.provider }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
-          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
-          VOXTRAL_API_KEY: ${{ secrets.VOXTRAL_API_KEY }}
-          VOXTRAL_VOICE_ID: ${{ secrets.VOXTRAL_VOICE_ID }}
-        run: go run . "$URL" podcast.mp3
-
-      - name: Publish release
+      - name: Work out the episode number and name
+        id: episode
         env:
           GH_TOKEN: ${{ github.token }}
-          URL: ${{ inputs.url }}
         run: |
-          tag="ep-$(printf '%s' "$URL" | sha256sum | cut -c1-12)"
-          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$tag" podcast.mp3 --title "$tag" --notes "Source: $URL"
-          link=$(gh release view "$tag" --json assets --jq '.assets[0].url')
-          echo "### 🎧 [$tag]($link)" >> "$GITHUB_STEP_SUMMARY"
-          echo "$link"
+          mkdir -p out
+          last=${URL%/}
+          last=${last##*/}
+          last=${last%%[?]*}
+          slug=$(printf '%s' "$last" \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr -c 'a-z0-9' '-' \
+            | sed -E 's/-+/-/g; s/^-|-$//g')
+          [ -n "$slug" ] || slug="episode"
+          tags=$(gh release list --limit 200 --json tagName --jq '.[].tagName')
+          existing=$(printf '%s\n' "$tags" | grep -E "^ep-[0-9]+-$slug$" | head -n1 || true)
+          if [ -n "$existing" ]; then
+            number=$(printf '%s' "$existing" | sed -E 's/^ep-([0-9]+)-.*/\1/')
+          else
+            number=$(( $(printf '%s\n' "$tags" | grep -c . || true) + 1 ))
+          fi
+          title=$(printf '%s' "$slug" | tr '-' ' ' \
+            | awk '{for(i=1;i<=NF;i++)$i=toupper(substr($i,1,1)) substr($i,2)}1')
+          {
+            echo "base=ep-$number-$slug"
+            echo "title=Episode $number - $title"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Summarize into LLM transcript
+        run: go run . transcript "$URL" out
+
+      - name: Convert text to speech via ${{ inputs.provider }}
+        run: go run . speak out
+
+      - name: Rename the episode files
+        env:
+          BASE: ${{ steps.episode.outputs.base }}
+        run: |
+          mv out/episode.mp3 "out/$BASE.mp3"
+          mv out/source.md "out/$BASE-source.md"
+          mv out/transcript.txt "out/$BASE-transcript.txt"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ steps.episode.outputs.base }}
+          TITLE: ${{ steps.episode.outputs.title }}
+        run: |
+          gh release delete "$BASE" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$BASE" \
+            "out/$BASE.mp3" \
+            "out/$BASE-source.md" \
+            "out/$BASE-transcript.txt" \
+            --title "$TITLE" --notes "Source: $URL"
+          link=$(gh release view "$BASE" --json assets --jq '.assets[0].url')
+          echo "### 🎧 [$TITLE]($link)" >> "$GITHUB_STEP_SUMMARY"

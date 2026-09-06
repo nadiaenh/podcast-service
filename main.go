@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -66,14 +68,14 @@ func main() {
 	}
 }
 
+const usage = `usage:
+  pod transcript <url> <dir>   fetch the article, write <dir>/source.md and <dir>/transcript.txt
+  pod speak <dir>              read <dir>/transcript.txt, write <dir>/episode.mp3`
+
 func run() error {
-	if len(os.Args) < 2 || len(os.Args) > 3 {
-		return fmt.Errorf("usage: pod <url> [output.mp3]")
-	}
-	url := os.Args[1]
-	out := "podcast.mp3"
-	if len(os.Args) == 3 {
-		out = os.Args[2]
+	args := os.Args[1:]
+	if len(args) == 0 {
+		return errors.New(usage)
 	}
 
 	if err := loadEnv(".env"); err != nil {
@@ -91,13 +93,40 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	result, err := pipeline.RunContext(ctx, cfg, url)
+
+	switch {
+	case args[0] == "transcript" && len(args) == 3:
+		return cmdTranscript(ctx, cfg, args[1], args[2])
+	case args[0] == "speak" && len(args) == 2:
+		return cmdSpeak(ctx, cfg, args[1])
+	default:
+		return errors.New(usage)
+	}
+}
+
+func cmdTranscript(ctx context.Context, cfg pipeline.Config, url, dir string) error {
+	result, err := pipeline.Transcript(ctx, cfg, url)
 	if err != nil {
 		return fmt.Errorf("failed: %w", err)
 	}
-	if err := os.WriteFile(out, result.Audio, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "source.md"), []byte(result.Source), 0o644); err != nil {
 		return err
 	}
-	fmt.Println(out)
+	if err := os.WriteFile(filepath.Join(dir, "transcript.txt"), []byte(result.Script), 0o644); err != nil {
+		return err
+	}
+	fmt.Println(result.Title)
 	return nil
+}
+
+func cmdSpeak(ctx context.Context, cfg pipeline.Config, dir string) error {
+	scriptText, err := os.ReadFile(filepath.Join(dir, "transcript.txt"))
+	if err != nil {
+		return err
+	}
+	audio, err := pipeline.Speak(ctx, cfg, string(scriptText))
+	if err != nil {
+		return fmt.Errorf("failed: %w", err)
+	}
+	return os.WriteFile(filepath.Join(dir, "episode.mp3"), audio, 0o644)
 }

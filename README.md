@@ -1,10 +1,14 @@
 # podcast factory
 
-Turns an article URL into a narrated MP3. Fetches the article, writes a script with Claude, and synthesizes audio with ElevenLabs or Voxtral. Run it locally, or trigger a GitHub Action that publishes the MP3 as a GitHub Release.
+Turns an article URL into a narrated podcast episode, because I get carsick reading during my commute to work so I would rather listen to my bookmarks.
 
-## 1. One-time setup
+A GitHub Action fetches the article, writes a spoken-summary transcript with Claude, synthesizes audio with ElevenLabs or Voxtral, and publishes everything as a GitHub Release.
 
-Requires Go 1.25+ (and `gh`, authenticated, for the Action).
+<!--Add DEMO here-->
+
+## Setup
+
+Requires the GitHub CLI (`gh`), authenticated.
 
 ```sh
 git clone git@github.com:nadiaenh/podcast-service.git
@@ -12,37 +16,16 @@ cd podcast-service
 ./setup.sh
 ```
 
-`setup.sh` creates `.env` from `.env.example` and, if you want, pushes those values to GitHub as repo secrets for the Action.
-
-`.env` / secrets:
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | yes | console.anthropic.com |
-| `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | for elevenlabs | elevenlabs.io |
-| `VOXTRAL_API_KEY` / `VOXTRAL_VOICE_ID` | for voxtral | console.mistral.ai |
-| `TTS_PROVIDER` | no | `elevenlabs` (default) or `voxtral` |
-
+`setup.sh` creates `.env` from `.env.example` (fill in your keys, then run it again) and pushes the values to GitHub as repo secrets for the Action.
 Only accounts with write access to the repo can trigger the Action, so the secrets stay yours even though the repo is public.
 
-## 2. Usage
+## Usage
 
-When triggered locally, it writes `./podcast.mp3` (or the path you pass):
-
-```sh
-go run . https://example.com/some-article
-go run . https://example.com/some-article out.mp3
-```
-
-When triggered via the GitHub Action — triggers the workflow, waits for it, prints the MP3's download URL:
+Trigger a run from the GitHub UI (Actions → "Generate new podcast" → Run workflow), or from the CLI:
 
 ```sh
-./scripts/make.sh https://example.com/some-article
-./scripts/make.sh https://example.com/some-article voxtral
+gh workflow run podcast.yml -f url=https://x.ai/news/designing-grok-bot
+gh workflow run podcast.yml -f url=https://x.ai/news/designing-grok-bot -f provider=voxtral
 ```
 
-Each run publishes a Release tagged `ep-<hash of url>`; re-running the same URL replaces it.
-
-## 3. Demo
-
-_TODO: add a screen recording or screenshots of a run._
+Each run publishes a Release (e.g. `Episode 1 - Designing Grok Bot`) containing the MP3 (`ep-1-designing-grok-bot.mp3`), the parsed article (`ep-1-designing-grok-bot-source.md`), the transcript (`ep-1-designing-grok-bot-transcript.txt`), and the source code. Re-running the same URL replaces its episode.
