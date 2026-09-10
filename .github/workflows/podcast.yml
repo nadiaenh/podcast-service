@@ -16,9 +16,13 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: podcast-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   generate:
-    name: Generate new podcast
+    name: Fetch, narrate and publish an episode
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -30,27 +34,27 @@ jobs:
       VOXTRAL_API_KEY: ${{ secrets.VOXTRAL_API_KEY }}
       VOXTRAL_VOICE_ID: ${{ secrets.VOXTRAL_VOICE_ID }}
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v5
+      - name: Check out the source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Install Go
-        uses: actions/setup-go@v6
+      - name: Set up Go 1.25
+        uses: actions/setup-go@v7
         with:
           go-version: "1.25"
 
-      # Validate every provider key.
-      - name: Verify API keys
+      - name: Verify the provider keys
         id: verify
         run: |
           if go run . verify-keys; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::API key verification failed; skipping podcast generation"
+            echo "::warning::key verification failed; skipping generation"
           fi
 
-      # Fetch the article.
-      - name: Fetch article source
+      - name: Fetch the article source
         id: fetch
         if: steps.verify.outputs.ok == 'true'
         run: |
@@ -59,22 +63,18 @@ jobs:
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::article source unavailable or too short; skipping podcast generation"
+            echo "::warning::article unavailable or too short; skipping generation"
           fi
 
-      - name: Work out the episode number and name
+      - name: Assign the episode number and slug
         id: episode
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          last=${URL%/}
-          last=${last##*/}
-          last=${last%%[?]*}
-          slug=$(printf '%s' "$last" \
-            | tr '[:upper:]' '[:lower:]' \
-            | tr -c 'a-z0-9' '-' \
-            | sed -E 's/-+/-/g; s/^-|-$//g')
+          last=${URL%/}; last=${last##*/}; last=${last%%[?]*}
+          # Lowercase, replace non-alphanumerics with single hyphens, trim ends.
+          slug=$(printf '%s' "$last" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -E 's/-+/-/g; s/^-|-$//g')
           [ -n "$slug" ] || slug="episode"
           tags=$(gh release list --limit 200 --json tagName --jq '.[].tagName')
           existing=$(printf '%s\n' "$tags" | grep -E "^ep-[0-9]+-$slug$" | head -n1 || true)
@@ -83,18 +83,18 @@ jobs:
           else
             number=$(( $(printf '%s\n' "$tags" | grep -c . || true) + 1 ))
           fi
-          title=$(printf '%s' "$slug" | tr '-' ' ' \
-            | awk '{for(i=1;i<=NF;i++)$i=toupper(substr($i,1,1)) substr($i,2)}1')
+          # Title-case the slug words for the release title.
+          title=$(printf '%s' "$slug" | tr '-' ' ' | awk '{for(i=1;i<=NF;i++)$i=toupper(substr($i,1,1)) substr($i,2)}1')
           {
             echo "base=ep-$number-$slug"
             echo "title=Episode $number - $title"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Summarize into LLM transcript
+      - name: Write the transcript with Claude
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         run: go run . transcript "$URL" out
 
-      - name: Convert text to speech via ${{ inputs.provider }}
+      - name: Synthesize the audio
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         run: go run . speak out
 
@@ -107,7 +107,7 @@ jobs:
           mv out/source.md "out/$BASE-source.md"
           mv out/transcript.txt "out/$BASE-transcript.txt"
 
-      - name: Create GitHub release
+      - name: Publish the GitHub release
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,9 +116,7 @@ jobs:
         run: |
           gh release delete "$BASE" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$BASE" \
-            "out/$BASE.mp3" \
-            "out/$BASE-source.md" \
-            "out/$BASE-transcript.txt" \
+            "out/$BASE.mp3" "out/$BASE-source.md" "out/$BASE-transcript.txt" \
             --title "$TITLE" --notes "Source: $URL"
           link=$(gh release view "$BASE" --json assets --jq '.assets[0].url')
           echo "### 🎧 [$TITLE]($link)" >> "$GITHUB_STEP_SUMMARY"

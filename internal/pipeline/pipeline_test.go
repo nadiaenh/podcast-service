@@ -5,50 +5,46 @@ import (
 	"testing"
 )
 
-func TestTTSChainOrdersPrimaryThenConfiguredFallback(t *testing.T) {
+func TestTTSChainSkipsUnconfiguredProviders(t *testing.T) {
 	both := Config{TTSProvider: "voxtral", VoxtralAPIKey: "k", VoxtralVoice: "v", ElevenLabsAPIKey: "k", ElevenLabsVoice: "v"}
 	if got := both.ttsChain(); len(got) != 2 || got[0] != "voxtral" || got[1] != "elevenlabs" {
-		t.Fatalf("chain = %v", got)
+		t.Fatalf("chain = %v, want [voxtral elevenlabs]", got)
 	}
-	noFallback := Config{TTSProvider: "voxtral", VoxtralAPIKey: "k", VoxtralVoice: "v"}
-	if got := noFallback.ttsChain(); len(got) != 1 || got[0] != "voxtral" {
-		t.Fatalf("chain without fallback = %v", got)
+
+	primaryOnly := Config{TTSProvider: "voxtral", VoxtralAPIKey: "k", VoxtralVoice: "v"}
+	if got := primaryOnly.ttsChain(); len(got) != 1 || got[0] != "voxtral" {
+		t.Fatalf("chain = %v, want [voxtral]", got)
+	}
+
+	// Primary selected but only the fallback has credentials: the fallback must still run.
+	fallbackOnly := Config{TTSProvider: "voxtral", ElevenLabsAPIKey: "k", ElevenLabsVoice: "v"}
+	if got := fallbackOnly.ttsChain(); len(got) != 1 || got[0] != "elevenlabs" {
+		t.Fatalf("chain = %v, want [elevenlabs]", got)
+	}
+
+	none := Config{TTSProvider: "voxtral"}
+	if got := none.ttsChain(); len(got) != 0 {
+		t.Fatalf("chain = %v, want empty", got)
 	}
 }
 
-func testConfig() Config {
-	return Config{AnthropicAPIKey: "test", ElevenLabsAPIKey: "test", ElevenLabsVoice: "voice", TTSProvider: "elevenlabs"}
-}
-
-func TestValidate(t *testing.T) {
-	if err := testConfig().validate(); err != nil {
-		t.Fatalf("valid config rejected: %v", err)
+func TestValidateAnthropic(t *testing.T) {
+	if err := (Config{AnthropicAPIKey: "test"}).validateAnthropic(); err != nil {
+		t.Fatalf("valid key rejected: %v", err)
 	}
-
-	missingKey := testConfig()
-	missingKey.AnthropicAPIKey = ""
-	if err := missingKey.validate(); err == nil {
+	if err := (Config{}).validateAnthropic(); err == nil {
 		t.Fatal("missing ANTHROPIC_API_KEY accepted")
 	}
+}
 
-	missingVoice := testConfig()
-	missingVoice.ElevenLabsVoice = ""
-	if err := missingVoice.validate(); err == nil {
-		t.Fatal("missing voice accepted")
-	}
-
-	voxtralNoKey := testConfig()
-	voxtralNoKey.TTSProvider = "voxtral"
-	voxtralNoKey.VoxtralVoice = "v"
-	if err := voxtralNoKey.validate(); err == nil {
-		t.Fatal("voxtral without key accepted")
+func TestScriptChecksAnthropicKeyBeforeNetwork(t *testing.T) {
+	if _, err := Script(context.Background(), Config{}, "https://example.com", "source text"); err == nil {
+		t.Fatal("missing key reached the network")
 	}
 }
 
-func TestScriptValidatesBeforeNetwork(t *testing.T) {
-	bad := testConfig()
-	bad.AnthropicAPIKey = ""
-	if _, err := Script(context.Background(), bad, "https://example.com", "source text"); err == nil {
-		t.Fatal("invalid config reached the network")
+func TestSpeakRejectsWhenNoProviderConfigured(t *testing.T) {
+	if _, err := Speak(context.Background(), Config{}, "some transcript"); err == nil {
+		t.Fatal("speak accepted a config with no TTS provider")
 	}
 }

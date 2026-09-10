@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="300" viewBox="0 0 720 300" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">
+  <rect width="720" height="300" rx="10" fill="#0d1117"/>
+  <circle cx="24" cy="24" r="6" fill="#f5ba74"/>
+  <circle cx="44" cy="24" r="6" fill="#3b4048"/>
+  <circle cx="64" cy="24" r="6" fill="#3b4048"/>
+  <text fill="#8b949e" x="20" y="70">$ pod fetch https://go.dev/blog/error-handling-and-go out</text>
+  <text fill="#c9d1d9" x="20" y="94">Error handling and Go</text>
+  <text fill="#8b949e" x="20" y="126">$ pod transcript https://go.dev/blog/error-handling-and-go out</text>
+  <text fill="#c9d1d9" x="20" y="150">wrote out/transcript.txt  (2.9 KB)</text>
+  <text fill="#8b949e" x="20" y="182">$ pod speak out</text>
+  <text fill="#c9d1d9" x="20" y="206">wrote out/episode.mp3  (1.4 MB, voxtral)</text>
+  <text fill="#8b949e" x="20" y="238">$ gh workflow run podcast.yml -f url=https://go.dev/blog/error-handling-and-go</text>
+  <text fill="#f5ba74" x="20" y="262">Episode 3 - Error Handling And Go  ->  Releases/ep-3-error-handling-and-go</text>
+</svg>

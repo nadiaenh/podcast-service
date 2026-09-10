@@ -39,11 +39,11 @@ func (cfg Config) credentials() tts.Credentials {
 	}
 }
 
-func (cfg Config) validate() error {
+func (cfg Config) validateAnthropic() error {
 	if strings.TrimSpace(cfg.AnthropicAPIKey) == "" {
 		return errors.New("ANTHROPIC_API_KEY is not set")
 	}
-	return tts.Validate(cfg.TTSProvider, cfg.credentials())
+	return nil
 }
 
 func (cfg Config) ttsProviders() (primary, fallback string) {
@@ -53,13 +53,17 @@ func (cfg Config) ttsProviders() (primary, fallback string) {
 	return "elevenlabs", "voxtral"
 }
 
+// ttsChain lists the providers to try, preferred first, skipping any whose
+// credentials are absent so a misconfigured primary never blocks a working fallback.
 func (cfg Config) ttsChain() []string {
 	primary, fallback := cfg.ttsProviders()
-	if tts.Validate(fallback, cfg.credentials()) == nil {
-		return []string{primary, fallback}
+	var chain []string
+	for _, name := range []string{primary, fallback} {
+		if tts.Validate(name, cfg.credentials()) == nil {
+			chain = append(chain, name)
+		}
 	}
-	warnf("tts: fallback provider %q is not configured; no cross-provider retry available", fallback)
-	return []string{primary}
+	return chain
 }
 
 func Fetch(ctx context.Context, url string) (Source, error) {
@@ -77,7 +81,7 @@ func Fetch(ctx context.Context, url string) (Source, error) {
 }
 
 func Script(ctx context.Context, cfg Config, url, source string) (string, error) {
-	if err := cfg.validate(); err != nil {
+	if err := cfg.validateAnthropic(); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(source) == "" {
@@ -104,13 +108,18 @@ func Speak(ctx context.Context, cfg Config, transcript string) ([]byte, error) {
 	if strings.TrimSpace(transcript) == "" {
 		return nil, errors.New("tts: transcript is empty")
 	}
-	if err := cfg.validate(); err != nil {
-		return nil, err
+	chain := cfg.ttsChain()
+	if len(chain) == 0 {
+		primary, fallback := cfg.ttsProviders()
+		return nil, fmt.Errorf("tts: no usable provider; configure %s or %s credentials", primary, fallback)
+	}
+	if len(chain) == 1 {
+		warnf("tts: only %q is configured; no cross-provider fallback", chain[0])
 	}
 
 	creds := cfg.credentials()
 	var lastErr error
-	for _, name := range cfg.ttsChain() {
+	for _, name := range chain {
 		audio, err := tts.Synthesize(ctx, name, creds, transcript)
 		if err != nil {
 			warnf("tts: provider %q failed: %v", name, err)

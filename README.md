@@ -1,24 +1,22 @@
-# podcast factory
+<p align="center"> 
+    <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25"> <img src="https://img.shields.io/badge/Anthropic-D97757?logo=anthropic&logoColor=white" alt="Claude"> 
+    <img src="https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white" alt="ElevenLabs"> 
+    <img src="https://img.shields.io/badge/Voxtral-FA520F?logo=mistralai&logoColor=fff" alt="Voxtral"> 
+    <a href=".github/workflows/checks.yml"><img src="https://github.com/nadiaenh/podcast-service/actions/workflows/checks.yml/badge.svg" alt="Checks"></a> 
+</p>
 
-![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white) ![Anthropic](https://img.shields.io/badge/Anthropic-Claude-D97757?logo=anthropic&logoColor=white) ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-TTS-000000?logo=elevenlabs&logoColor=white) ![Mistral](https://img.shields.io/badge/Mistral-Voxtral-FA520F?logo=mistralai&logoColor=white)
+**sockpuppet** is a pipeline that turns written content into a narrated MP3. See recent episodes in the [Releases](https://github.com/nadiaenh/sockpuppet/releases) page. Each release contains the source content as-ingested, the narrated transcript, and the MP3.
 
-Turns an article URL into a narrated podcast episode, because I get carsick reading during my commute to work so I would rather listen to my bookmarks.
-
-A GitHub Action fetches the article, writes a spoken-summary transcript with Claude, synthesizes audio with ElevenLabs or Voxtral, and publishes everything as a [GitHub Release](https://github.com/nadiaenh/podcast-service/releases).
-
-<!--Add DEMO here-->
+<p align="center"><img width="250" src="https://media.tenor.com/3ALrVOdGNYoAAAAi/happy-funny.gif" alt="Sock puppet"></p>
 
 ## Setup
-
-Requires the GitHub CLI (`gh`), authenticated.
 
 ```sh
 git clone git@github.com:nadiaenh/podcast-service.git
 cd podcast-service
+gh auth login
 ./setup.sh
 ```
-
-`setup.sh` creates `.env` from `.env.example` (fill in your keys, then run it again) and pushes the values to GitHub as repo secrets for the Action. Only accounts with write access to the repo can trigger the Action, so the secrets stay yours even though the repo is public.
 
 ## Usage
 
@@ -26,7 +24,20 @@ Trigger a run from the GitHub UI (Actions → "Generate new podcast" → Run wor
 
 ```sh
 gh workflow run podcast.yml -f url=https://x.ai/news/designing-grok-bot
-gh workflow run podcast.yml -f url=https://x.ai/news/designing-grok-bot -f provider=voxtral
+gh workflow run podcast.yml -f url=https://x.ai/news/designing-grok-bot -f provider=elevenlabs
 ```
 
-Each run publishes a Release (e.g. `Episode 1 - Designing Grok Bot`) containing the MP3 (`ep-1-designing-grok-bot.mp3`), the parsed article (`ep-1-designing-grok-bot-source.md`), the transcript (`ep-1-designing-grok-bot-transcript.txt`), and the source code. Re-running the same URL replaces its episode.
+Run the pipeline locally against your `.env` keys:
+
+```sh
+mkdir -p out
+go run . verify-keys
+go run . fetch https://x.ai/news/designing-grok-bot out
+go run . transcript https://x.ai/news/designing-grok-bot out
+go run . speak out
+go test ./...
+```
+
+## Demo
+
+![Four CLI commands producing an episode Release](assets/demo.svg)
