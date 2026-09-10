@@ -1,4 +1,4 @@
-name: Generate new podcast
+name: Generate a new podcast episode
 
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ jobs:
       VOXTRAL_API_KEY: ${{ secrets.VOXTRAL_API_KEY }}
       VOXTRAL_VOICE_ID: ${{ secrets.VOXTRAL_VOICE_ID }}
     steps:
-      - name: Check out the source
+      - name: Check out source
         uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -44,7 +44,7 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Verify the provider keys
+      - name: Verify provider keys
         id: verify
         run: |
           if go run . verify-keys; then
@@ -54,7 +54,7 @@ jobs:
             echo "::warning::key verification failed; skipping generation"
           fi
 
-      - name: Fetch the article source
+      - name: Fetch article source
         id: fetch
         if: steps.verify.outputs.ok == 'true'
         run: |
@@ -66,7 +66,7 @@ jobs:
             echo "::warning::article unavailable or too short; skipping generation"
           fi
 
-      - name: Assign the episode number and slug
+      - name: Assign episode number and slug
         id: episode
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
@@ -90,15 +90,15 @@ jobs:
             echo "title=Episode $number - $title"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Write the transcript with Claude
+      - name: Write transcript with Claude
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         run: go run . transcript "$URL" out
 
-      - name: Synthesize the audio
+      - name: Synthesize audio
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         run: go run . speak out
 
-      - name: Rename the episode files
+      - name: Rename episode files
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
           BASE: ${{ steps.episode.outputs.base }}
@@ -107,7 +107,7 @@ jobs:
           mv out/source.md "out/$BASE-source.md"
           mv out/transcript.txt "out/$BASE-transcript.txt"
 
-      - name: Publish the GitHub release
+      - name: Publish GitHub release
         if: steps.verify.outputs.ok == 'true' && steps.fetch.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
