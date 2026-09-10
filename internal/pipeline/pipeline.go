@@ -7,9 +7,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"podcast-service/internal/extract"
-	"podcast-service/internal/script"
-	"podcast-service/internal/tts"
+	"sockpuppet/internal/extract"
+	"sockpuppet/internal/script"
+	"sockpuppet/internal/tts"
 )
 
 const minSourceChars = 600

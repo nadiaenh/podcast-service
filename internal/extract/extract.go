@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"podcast-service/internal/httpx"
+	"sockpuppet/internal/httpx"
 )
 
 type Result struct {
@@ -93,7 +93,7 @@ func fetchHTML(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", errors.New("invalid article request")
 	}
-	req.Header.Set("User-Agent", "podcast-service/1.0")
+	req.Header.Set("User-Agent", "sockpuppet/1.0")
 	body, err := httpx.Do(articleClient, req, 4<<20, false)
 	return string(body), err
 }

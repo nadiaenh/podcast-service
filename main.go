@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"podcast-service/internal/pipeline"
+	"sockpuppet/internal/pipeline"
 )
 
 func loadEnv(path string) error {
@@ -77,12 +77,16 @@ func run() error {
 	if provider == "" {
 		provider = "voxtral"
 	}
+	voxtralVoice := os.Getenv("VOXTRAL_VOICE_ID")
+	if voxtralVoice == "" {
+		voxtralVoice = "en_paul_cheerful"
+	}
 	cfg := pipeline.Config{
 		AnthropicAPIKey:  os.Getenv("ANTHROPIC_API_KEY"),
 		ElevenLabsAPIKey: os.Getenv("ELEVENLABS_API_KEY"),
 		ElevenLabsVoice:  os.Getenv("ELEVENLABS_VOICE_ID"),
 		VoxtralAPIKey:    os.Getenv("VOXTRAL_API_KEY"),
-		VoxtralVoice:     os.Getenv("VOXTRAL_VOICE_ID"),
+		VoxtralVoice:     voxtralVoice,
 		TTSProvider:      provider,
 	}
 

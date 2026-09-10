@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"podcast-service/internal/httpx"
+	"sockpuppet/internal/httpx"
 )
 
 type Credentials struct {

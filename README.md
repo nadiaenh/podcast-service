@@ -2,7 +2,7 @@
     <img src="https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white" alt="Go 1.25"> <img src="https://img.shields.io/badge/Anthropic-D97757?logo=anthropic&logoColor=white" alt="Claude"> 
     <img src="https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white" alt="ElevenLabs"> 
     <img src="https://img.shields.io/badge/Voxtral-FA520F?logo=mistralai&logoColor=fff" alt="Voxtral"> 
-    <a href=".github/workflows/checks.yml"><img src="https://github.com/nadiaenh/podcast-service/actions/workflows/checks.yml/badge.svg" alt="Checks"></a> 
+    <a href=".github/workflows/checks.yml"><img src="https://github.com/nadiaenh/sockpuppet/actions/workflows/checks.yml/badge.svg" alt="Checks"></a> 
 </p>
 
 **sockpuppet** is a pipeline that turns written content into a narrated MP3. See recent episodes in the [Releases](https://github.com/nadiaenh/sockpuppet/releases) page. Each release contains the source content as-ingested, the narrated transcript, and the MP3.
@@ -12,8 +12,8 @@
 ## Setup
 
 ```sh
-git clone git@github.com:nadiaenh/podcast-service.git
-cd podcast-service
+git clone git@github.com:nadiaenh/sockpuppet.git
+cd sockpuppet
 gh auth login
 ./setup.sh
 ```

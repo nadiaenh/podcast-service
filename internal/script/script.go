@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"podcast-service/internal/httpx"
+	"sockpuppet/internal/httpx"
 	"strings"
 	"time"
 )

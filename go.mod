@@ -1,3 +1,3 @@
-module podcast-service
+module sockpuppet
 
 go 1.25
